@@ -57,3 +57,95 @@ def process_image(image_path):
     tensor_img = torch.from_numpy(np_img)
         
     return tensor_img
+
+
+def load_data(data_dir):
+    """
+    Loads the training, validation, and test data in the required format.
+    Parameters:
+     None
+    Returns:
+     The iterator train_loader, valid_loader, and test_loader objects
+    """
+    # define transforms for the training, validation, and testing sets    
+    # data_dir = 'flowers'
+    train_dir = data_dir + '/train'
+    valid_dir = data_dir + '/valid'
+    test_dir = data_dir + '/test'
+
+    # data transforms for the training phase
+    data_transforms_train = transforms.Compose([transforms.RandomRotation(15),
+                                                transforms.RandomResizedCrop(224),
+                                                transforms.RandomHorizontalFlip(),
+                                                transforms.ToTensor(),
+                                                transforms.Normalize([0.485, 0.456, 0.406],
+                                                                     [0.229, 0.224, 0.225])])
+    
+    # data transforms for the validation and test phases
+    data_transforms_valid = transforms.Compose([transforms.Resize(255),
+                                                transforms.CenterCrop(224),
+                                                transforms.ToTensor(),
+                                                transforms.Normalize([0.485, 0.456, 0.406],
+                                                                     [0.229, 0.224, 0.225])])
+
+    # load the datasets with ImageFolder
+    train_data = datasets.ImageFolder(train_dir, transform=data_transforms_train)
+    valid_data = datasets.ImageFolder(valid_dir, transform=data_transforms_valid)
+    test_data = datasets.ImageFolder(test_dir, transform=data_transforms_valid)
+
+    # using the image datasets and the trainforms, define the dataloaders
+    train_loader = torch.utils.data.DataLoader(dataset=train_data, batch_size=96, shuffle=True)
+    valid_loader = torch.utils.data.DataLoader(dataset=valid_data, batch_size=96, shuffle=True)
+    test_loader = torch.utils.data.DataLoader(dataset=test_data, batch_size=96, shuffle=True)
+    
+    return train_data, train_loader, valid_loader, test_loader
+
+# no longer needed 
+def data_loader(data, phase='training'):
+    """
+    Iterator object to load training, validation, and test datasets
+    Parameters:
+     data - dataset to use for training
+     phase - network phase - training, validation, or testing
+    Returns:
+     dataLoader iterator object
+    """
+    if phase == 'training':
+        train_loader = torch.utils.data.DataLoader(data, 96, True)
+        return train_loader
+    elif phase == 'validation':
+        valid_loader = torch.utils.data.DataLoader(data, 96, True)
+        return valid_loader
+    elif phase == 'testing':
+        test_loader = torch.utils.data.DataLoader(data, 96, True)
+        return test_loader
+
+def imshow(image, ax=None, title=None):
+    """
+    Accepts an image and displays the image on a chart.
+    Parameters:
+     Image - Full directory path to the image 
+     ax - The axis on which the plot the image. Default - None
+     Title - Title of the chart. Default - None
+    Returns:
+     The transformed image in a matplotlib chart
+    """
+    if ax is None:
+        fig, ax = plt.subplots()
+    
+    # PyTorch tensors assume the color channel is the first dimension
+    # but matplotlib assumes is the third dimension
+    image = image.numpy().transpose((1, 2, 0))
+    
+    # Undo preprocessing
+    mean = np.array([0.485, 0.456, 0.406])
+    std = np.array([0.229, 0.224, 0.225])
+    image = std * image + mean
+    
+    # Image needs to be clipped between 0 and 1 or it looks like noise when displayed
+    image = np.clip(image, 0, 1)
+    
+    ax.imshow(image)
+    
+    return ax
+
