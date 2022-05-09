@@ -102,3 +102,182 @@ def save_checkpoint(model, idx_data, save_dir):
     torch.save(checkpoint, save_dir +'/'+'checkpoint.pth')
     checkpoint_file = save_dir +'/checkpoint.pth'
     return checkpoint_file
+def load_checkpoint(path, arch):
+    """
+    Loads a PyTorch checkpoint file from directory
+    Parameters:
+     path - Directory path to checkpoint file
+    Returns:
+     PyTorch model
+    """
+    # ensure the model is loaded by GPU even if the GPU is off (SO)
+    if torch.cuda.is_available():
+        map_location = lambda storage, loc: storage.cuda()
+    else:
+        map_location = 'cpu'
+    checkpoint = torch.load(path, map_location=map_location)
+    
+    # load the arch of the model used in the training phase
+    model = eval('models.{}(pretrained=True)'.format(arch))
+    model.classifier = checkpoint['classifier']
+    model.class_to_idx = checkpoint['class_to_idx']
+    model.load_state_dict(checkpoint['state_dict'])
+    
+    for param in model.parameters():
+        # disable use of gradients since we are predicting at this point
+        param.requires_grad = False
+    
+    return model
+
+def train_model(epochs, train_loader, valid_loader, device, model, optimizer, criterion):
+    """
+    Trains a PyTorch network model object
+    Parameters:
+     epochs - number ot training epochs
+     train_loader - iterator object containing the training dataset
+     valid_loader - iterator object containing the validation dataset
+     device - device for training can be GPU or CPU
+     model - PyTorch pretrained model to use in training
+     optimizer - optimizer object to use in training eg Adam
+     criterion - error loss criterion metric eg NLLLoss
+    Returns:
+     The trained network Pytorch model
+    """
+    # Train the classifier layers using backpropagation using the pre-trained network to get the features
+    train_steps = 0
+    train_loss = 0
+    iteration = 5
+    start_time = time()
+    print('###################### Start Model Training ######################')
+    for epoch in range(epochs):
+        # Training loop
+        for images, labels in train_loader:
+            train_steps += 1
+
+            # Add images and labels to device
+            images, labels = images.to(device), labels.to(device)
+
+            # zero gradients before each loop pass, move forward, loss, backwards, step
+            optimizer.zero_grad()
+            logps = model.forward(images)
+            loss = criterion(logps, labels)
+            loss.backward()
+            optimizer.step()
+
+            train_loss += loss.item()
+
+            # Testing accurracy on validation data
+            if train_steps % iteration == 0:
+                valid_loss = 0
+                valid_accuracy = 0
+                # Place model in evaluation mode
+                model.eval()
+
+                # speed up by removing gradients calculations
+                with torch.no_grad():                
+                    for images, labels in valid_loader:                
+                        # Add images and labels to device
+                        images, labels = images.to(device), labels.to(device)
+
+                        # Calculating loss on validation set
+                        logps_valid = model.forward(images)
+                        loss = criterion(logps_valid, labels)
+                        valid_loss += loss.item()
+
+                        # Calculating accuracy on validation set
+                        proba_valid = torch.exp(logps_valid)
+                        top_proba, top_class = proba_valid.topk(1, dim=1)
+                        equality = top_class == labels.view(*top_class.shape)
+                        valid_accuracy += torch.mean(equality.type(torch.FloatTensor)).item()
+
+                # Display results
+                print('Epoch {}/{} ...'.format(epoch+1, epochs),
+                      'Training Loss: {:3f} ...'.format(train_loss/len(train_loader)),
+                      'Validation Loss: {:3f} ...'.format(valid_loss/len(valid_loader)),
+                      'Validation Accuracy: {:3f} '.format(valid_accuracy/len(valid_loader))
+                     )
+                running_loss = 0
+                model.train()  
+                
+    print('###################### End Model Training ######################')
+    print('Elapsed time: {}'.format((time() - start_time)//60))
+    
+    # return trained model
+    return model
+      
+# test the above model on test images
+# using the function from https://github.com/chauhan-nitin/Udacity-ImageClassifier/blob/master/train.py
+# this is strictly not needed - just a nice to have
+def test_model(model, test_loader, device):
+    """
+    Test the trained model on some never before seen test data
+    Parameters:
+     model - PyTorch trained model 
+     test_loader - iterator object containing the testing dataset
+     device - device for training can be GPU or CPU
+    Returns:
+     None - Only prints results to screen
+    """
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        model.eval()
+        for images, labels in test_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+    
+    print('Accuracy achieved by the network on test images is: %d%%' % (100 * correct/total))
+    
+def predict(image, model, topk, device, category_names):
+    """
+    Given an input image predicts the results
+    Parameters:
+     image - processed image file path to input image
+     model - PyTorch trained model
+     topk - number of top probalilities to return
+     device - device for training can be GPU or CPU
+     category_names - path to flower classes to names file
+    Returns:
+     proba - list of top probabilities
+     labels - list of  top labels
+     flowers - list of top flower names
+    """
+    img = image.unsqueeze(0).float()    
+    model.to(device)    
+    model.eval()                # evaluation mode
+    
+    with torch.no_grad():
+        ps = model(img)
+    proba = F.softmax(ps.data, dim=1)      # use Functional and softmax to do the hard lifting
+    
+    # unpack proba topk into probabilities and labels
+    proba, labels = proba.topk(topk)
+    
+    # convert from tensor objects to numpy arrays
+    proba = proba.to('cpu').numpy().squeeze()
+    labels = labels.to('cpu').numpy().squeeze()
+    
+    # Convert to classes
+    idx_to_class = {val: key for key, val in model.class_to_idx.items()}
+    labels = [idx_to_class[i] for i in labels]
+    flowers = [category_names[i] for i in labels]
+
+    return proba, labels, flowers
+    
+# using the function from https://github.com/chauhan-nitin/Udacity-ImageClassifier/blob/master/predict.py    
+def get_results(ps, images):
+    """
+    Prints the output of the prediction and the top probabilities
+    Parameters:
+     ps - list of the top probabilities
+     images - list of the top flower names
+    Returns:
+     None - Only displays the results
+    """
+    for i, j in enumerate(zip(ps, images)):
+        print('Rank {}:'.format(i+1),
+              'Flower: {}, Likelihood: {}%'.format(j[1], ceil(j[0]*100)))
+    
